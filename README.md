@@ -10,7 +10,7 @@ appointment or escalates to a human — in real time over a phone call.
 |---|---|
 | Media/SIP (call ingress) | LiveKit Cloud (free tier) |
 | Telephony trunk | Twilio |
-| Agent worker + orchestrator compute | Hugging Face Space (Gradio SDK — Docker Spaces require billing details on file, Gradio doesn't), kept warm via UptimeRobot |
+| Agent worker + orchestrator compute | Hugging Face Space (Gradio SDK, ZeroGPU hardware — free accounts can no longer run CPU-basic compute Spaces of any SDK without PRO), kept warm via UptimeRobot |
 | Backend | FastAPI |
 | Database + vector store | Supabase (Postgres + pgvector) |
 | ASR | Deepgram (primary), AssemblyAI (fallback) |
@@ -19,17 +19,26 @@ appointment or escalates to a human — in real time over a phone call.
 | Dashboard | React/TypeScript |
 | Observability | OpenTelemetry + Langfuse |
 
-## Current status: Day-1 connectivity spike
+## Current status: Day-1 connectivity spike — confirmed working end-to-end
 
-Before building the full ASR/LLM/TTS pipeline, we're validating one thing in
-isolation: can a LiveKit agent running on a Hugging Face Space actually join
-a LiveKit Cloud room and pass audio both ways? This matters because the
-agent worker is meant to run there, and Hugging Face restricts outbound
-network traffic to ports 80/443/8080 — everything else here builds on the
-assumption that this works. **Confirmed working when run locally** (both
-directions: the tone was heard, inbound mic audio was logged); still needs
-confirming from the actual Hugging Face deployment, which is the real test
-since local dev runs on an unrestricted network.
+The one thing everything else was waiting on: can a LiveKit agent actually
+running on a Hugging Face Space join a LiveKit Cloud room and pass audio
+both ways? **Confirmed, from the real deployment, not just locally** — the
+Space registered with LiveKit Cloud, a human joined the room, heard the
+agent's test tone, and the agent logged clean, continuous inbound audio
+(8s, evenly spaced frames, no gaps) from that human's mic. Hugging Face's
+network restrictions (80/443/8080 only) do not block LiveKit's WebRTC media
+path in practice.
+
+Two real bugs surfaced and got fixed along the way, worth knowing about if
+touching `agent/app.py` again:
+- `.env` was never actually loaded into the process (missing `load_dotenv()`
+  call) — silent until the worker failed with a missing-URL error.
+- The LiveKit worker spawns subprocesses per job, and Python's
+  multiprocessing re-imports `app.py` in each one; unguarded top-level
+  `demo.launch()` calls re-ran in every subprocess and crash-looped the
+  whole worker fighting over the same port. Fixed by guarding everything
+  behind `if __name__ == "__main__":`.
 
 `agent/connectivity_spike.py` has no ASR/LLM/TTS dependency on purpose. It
 joins a room, plays a continuous 440Hz test tone (so a human in the room can
@@ -93,16 +102,14 @@ the same process.
    git subtree push --prefix=agent hf-space main
    ```
 
-### The actual test we care about
+### The actual test we cared about — passed
 
-Local dev runs on an unrestricted network, so it doesn't test the thing
-we're actually unsure about. The real spike is: once deployed, confirm the
-Space's page loads (Gradio's server responding is the health signal here),
-then join the LiveKit test room again and confirm audio still flows both
-ways from that deployment. If it does, the HF Spaces + LiveKit Cloud
-combination is validated and we build the rest of the pipeline on top of
-it. If it doesn't, we find out in an hour instead of after a week of
-building on a broken assumption.
+Local dev runs on an unrestricted network, so it didn't test the thing we
+were actually unsure about. The real test was from the deployed Space
+itself, and it passed: audio flows both ways through HF Spaces + LiveKit
+Cloud. The rest of the pipeline (ASR/LLM/TTS, state machine, RAG, provider
+failover, dashboard, evals) can now be built on top of this without that
+assumption hanging over it.
 
 ### A note on the CLI
 
