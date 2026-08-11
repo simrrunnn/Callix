@@ -52,7 +52,7 @@ create table if not exists kb_chunks (
     id uuid primary key default gen_random_uuid(),
     document_id uuid not null references kb_documents(id) on delete cascade,
     content text not null,
-    embedding vector(1536), -- matches OpenAI text-embedding-3-small dimensionality
+    embedding vector(384), -- matches sentence-transformers/all-MiniLM-L6-v2 (via HF Inference API)
     created_at timestamptz not null default now()
 );
 
