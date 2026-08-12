@@ -13,6 +13,7 @@ queries) is used instead of opening a fresh connection per call, since
 each new connection is a real network round-trip.
 """
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -31,9 +32,22 @@ class CallState:
     """Shared per-call state, passed as AgentSession(userdata=...) so both
     the session-level event hooks (voice_agent.py) and Agent tools
     (pipeline_agents.py) can reach the same call_id without threading it
-    through every function signature."""
+    through every function signature.
 
-    call_id: UUID
+    Holds a Task, not a resolved UUID -- confirmed live that awaiting
+    create_call() before starting the session added ~5.5s to the critical
+    path (first connection pool setup: SSL handshake + auth to Supabase),
+    delaying the greeting by that much. Kicking create_call() off
+    concurrently and only awaiting it here, whenever call_id is actually
+    first needed (several turns into the conversation for most calls),
+    means the greeting no longer waits on it at all -- while still being
+    correct if something needs it before it resolves, since awaiting an
+    already-done Task just returns the cached result immediately."""
+
+    call_id_task: "asyncio.Task[UUID]"
+
+    async def get_call_id(self) -> UUID:
+        return await self.call_id_task
 
 
 async def get_pool() -> asyncpg.Pool:
@@ -88,6 +102,35 @@ async def record_turn(
         caller_transcript,
         agent_reply,
     )
+
+
+async def find_active_appointment(customer_name: str) -> dict | None:
+    """Finds an existing 'booked' appointment under this name, if any.
+    Matched on name alone since there's no real caller identity (phone
+    number) yet -- weak matching (two different callers could share a
+    common name), but confirmed live this gap is real: a second booking
+    for a name that already had a 3pm appointment silently created a
+    duplicate with no warning at all. This is a known simplification, not
+    a complete fix -- proper caller-identity tracking (e.g. phone number
+    once real telephony is wired up) would replace this."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "select id, service, scheduled_for from appointments "
+        "where lower(customer_name) = lower($1) and status = 'booked' "
+        "order by scheduled_for limit 1",
+        customer_name,
+    )
+    return dict(row) if row else None
+
+
+async def cancel_appointment(appointment_id: UUID) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "update appointments set status = 'cancelled', updated_at = now() "
+        "where id = $1",
+        appointment_id,
+    )
+    logger.info("db: cancelled appointment %s", appointment_id)
 
 
 async def create_appointment(

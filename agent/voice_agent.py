@@ -11,12 +11,18 @@ pipeline_agents.py (IntentAgent <-> BookingAgent, via LiveKit's handoff
 mechanism) -- same providers, same session wiring, just real conversation
 structure instead of one open-ended agent.
 
-Stage 3 (this version) adds Supabase persistence: a `calls` row per call,
-a `turns` row per conversation item (one side of an exchange -- see
-db.record_turn's docstring for why it's not a caller+reply pair), and
-`db.CallState` shared via AgentSession(userdata=...) so pipeline_agents.py
-can create the `appointments` row from inside confirm_booking without
-threading call_id through every function signature.
+Stage 3 adds Supabase persistence: a `calls` row per call, a `turns` row
+per conversation item (one side of an exchange -- see db.record_turn's
+docstring for why it's not a caller+reply pair), and `db.CallState` shared
+via AgentSession(userdata=...) so pipeline_agents.py can create the
+`appointments` row from inside confirm_booking without threading call_id
+through every function signature.
+
+`db.create_call()` is kicked off here but NOT awaited before starting the
+session -- confirmed live that awaiting it first added ~5.5s to the
+critical path (first DB connection pool setup), delaying the greeting by
+that much for no real reason, since nothing about greeting the caller
+actually depends on the call_id existing yet.
 """
 
 import asyncio
@@ -42,10 +48,31 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await ctx.connect()
     logger.info("connected to room %s", ctx.room.name)
 
-    call_id = await db.create_call(ctx.room.name)
+    call_id_task = asyncio.create_task(db.create_call(ctx.room.name))
+    call_state = db.CallState(call_id_task=call_id_task)
 
     session = agents.AgentSession(
-        stt=deepgram.STT(),
+        stt=deepgram.STT(
+            # Nova-3 keyterm prompting: biases recognition toward this
+            # vocabulary. Added after a live test where "waxing" got
+            # misheard as "vaccine" repeatedly, causing several costly
+            # extra back-and-forth turns (each one paying for another
+            # LLM call + TTS synthesis) before the caller finally spelled
+            # it out letter by letter.
+            keyterm=[
+                "haircut",
+                "beard trim",
+                "hair coloring",
+                "blowout",
+                "styling",
+                "waxing",
+                "kids haircut",
+                "appointment",
+                "reschedule",
+                "cancel",
+                "Willow Lane",
+            ],
+        ),
         llm=openai.LLM(
             model=OPENROUTER_MODEL,
             api_key=os.environ["OPENROUTER_API_KEY"],
@@ -53,13 +80,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         ),
         tts=cartesia.TTS(),
         vad=silero.VAD.load(),
-        # Default is 3.0s, and the first live test showed the initial
+        # Default is 3.0s, and an earlier live test showed the initial
         # greeting waits for this to finish before speaking at all --
         # confirmed in logs (aec warmup start/expire timestamps lined up
         # exactly with the greeting firing). Shortened for a snappier
         # start; tradeoff is less time for echo-cancellation calibration.
         aec_warmup_duration=1.0,
-        userdata=db.CallState(call_id=call_id),
+        userdata=call_state,
     )
 
     turn_index = 0
@@ -75,21 +102,27 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             return
         turn_index += 1
         text = item.text_content
-        if item.role == "user":
-            asyncio.create_task(
-                db.record_turn(call_id, turn_index, caller_transcript=text)
-            )
-        else:
-            asyncio.create_task(
-                db.record_turn(call_id, turn_index, agent_reply=text)
-            )
+        role = item.role
+
+        async def _record() -> None:
+            call_id = await call_state.get_call_id()
+            if role == "user":
+                await db.record_turn(call_id, turn_index, caller_transcript=text)
+            else:
+                await db.record_turn(call_id, turn_index, agent_reply=text)
+
+        asyncio.create_task(_record())
 
     @session.on("close")
     def _on_close(event: agents.CloseEvent) -> None:
-        asyncio.create_task(db.end_call(call_id, event.reason.value))
+        async def _end() -> None:
+            call_id = await call_state.get_call_id()
+            await db.end_call(call_id, event.reason.value)
+
+        asyncio.create_task(_end())
 
     await session.start(agent=IntentAgent(), room=ctx.room)
-    logger.info("session started (call_id=%s)", call_id)
+    logger.info("session started")
 
 
 def run() -> None:
