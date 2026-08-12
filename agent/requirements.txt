@@ -8,3 +8,5 @@ numpy
 python-dotenv
 gradio>=6.22
 spaces
+asyncpg
+huggingface_hub

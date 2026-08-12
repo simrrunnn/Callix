@@ -1,13 +1,16 @@
 """
-Gradio-wrapped entrypoint for the Day-1 connectivity spike, used only for
-the Hugging Face Space deployment.
+Gradio-wrapped entrypoint for the real voice pipeline (voice_agent.py +
+pipeline_agents.py: state machine, RAG, Supabase persistence), used only
+for the Hugging Face Space deployment. Previously wrapped
+connectivity_spike.py (the Day-1 connectivity-only spike, still in this
+repo for reference but no longer what gets deployed here).
 
-Why this exists instead of just deploying connectivity_spike.py directly:
+Why this exists instead of just deploying voice_agent.py directly:
 Docker-SDK Spaces currently require a payment method on file before you can
 create one, even on the free CPU tier. Gradio-SDK Spaces don't. The agent
-logic itself is unchanged (see connectivity_spike.py) -- this file only
-changes how the process is started, to fit HF's Gradio runtime instead of a
-Dockerfile we control directly.
+logic itself is unchanged (see voice_agent.py / pipeline_agents.py) -- this
+file only changes how the process is started, to fit HF's Gradio runtime
+instead of a Dockerfile we control directly.
 
 Hugging Face routes external traffic to exactly one port per Space, and
 Gradio needs that port for its own UI -- so Gradio's web server is what
@@ -39,7 +42,7 @@ import spaces
 from dotenv import load_dotenv
 from livekit import agents
 
-from connectivity_spike import entrypoint
+from voice_agent import entrypoint
 
 
 @spaces.GPU(duration=30)
@@ -52,11 +55,13 @@ def main() -> None:
     load_dotenv()
     logging.basicConfig(level=logging.INFO)
 
-    with gr.Blocks(title="Voice Agent Connectivity Spike") as demo:
+    with gr.Blocks(title="Voice Agent") as demo:
         gr.Markdown(
-            "## Voice agent connectivity spike\n\n"
+            "## Voice agent -- inbound call handling\n\n"
             "This Space runs a background LiveKit agent worker, not an "
-            "interactive UI. It registers "
+            "interactive UI. It handles booking/rescheduling appointments, "
+            "answers questions grounded in a knowledge base (RAG), and "
+            "persists calls/turns/appointments to Supabase. It registers "
             "with the LiveKit Cloud project configured via this Space's "
             "secrets and waits for a room to be dispatched to it. Check "
             "this Space's **Logs** tab for connection status.\n\n"
