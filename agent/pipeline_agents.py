@@ -43,16 +43,28 @@ answers instead of treating confusing input as a reason to cancel -- a
 live test showed a garbled/cut-off name ("It's in an") caused the model to
 call cancel_booking rather than ask again.
 
-Deliberately no RAG or database writes yet -- those are the next two
-layers, added only after this handoff mechanism is proven reliable. For
-now, `confirm_booking` just logs instead of persisting, and general
-questions are answered directly from the LLM's own knowledge instead of a
-real knowledge base.
+`confirm_booking` now persists to Supabase (via db.create_appointment)
+instead of just logging. That needs an actual timestamp, not free text
+like "tomorrow at 5 PM" -- so the tool asks the model for ISO 8601
+specifically, and BookingAgent's instructions include today's real date
+(computed fresh each time the class is instantiated, never hardcoded) so
+the model can resolve "tomorrow" correctly instead of guessing -- a live
+test showed it once hallucinate an appointment dated 2023 with no date
+grounding at all. If the model still sends something unparseable,
+confirm_booking raises ToolError so the model sees the failure and can
+retry/ask again, instead of silently corrupting or dropping the booking.
+
+RAG (real knowledge-base-grounded Q&A) is still the next layer -- general
+questions are still answered directly from the LLM's own knowledge for
+now.
 """
 
 import logging
+from datetime import date, datetime, timezone
 
 from livekit import agents
+
+import db
 
 logger = logging.getLogger("voice-agent")
 
@@ -134,16 +146,21 @@ class IntentAgent(agents.Agent):
 
 class BookingAgent(agents.Agent):
     def __init__(self) -> None:
+        today = date.today().isoformat()
         super().__init__(
             instructions=(
                 "You are collecting details for an appointment booking. "
-                "Ask one question at a time to get: what service they need, "
-                "their preferred date/time, and their name. Once you have "
-                "all three, call confirm_booking. If an answer is unclear, "
-                "garbled, or cut off, ask the caller to repeat it -- do NOT "
-                "call cancel_booking just because something was hard to "
-                "understand. Only call cancel_booking if the caller "
-                "explicitly says they no longer want to book. Keep "
+                f"Today's date is {today}. Ask one question at a time to "
+                "get: what service they need, their preferred date/time, "
+                "and their name. Once you have all three, call "
+                "confirm_booking -- convert whatever date/time they said "
+                "(e.g. 'tomorrow at 5pm') into ISO 8601 format "
+                "(YYYY-MM-DDTHH:MM:SS) using today's date as the "
+                "reference point; never guess a year. If an answer is "
+                "unclear, garbled, or cut off, ask the caller to repeat it "
+                "-- do NOT call cancel_booking just because something was "
+                "hard to understand. Only call cancel_booking if the "
+                "caller explicitly says they no longer want to book. Keep "
                 "responses short -- this is a live phone call."
             ),
             tools=[escalate, end_call],
@@ -167,12 +184,44 @@ class BookingAgent(agents.Agent):
         date_time: str,
         customer_name: str,
     ) -> agents.Agent:
-        """Call once you have the service, date/time, and customer name."""
-        # NOTE: no persistence yet -- Supabase writes are the next layer.
+        """Call once you have the service, date/time, and customer name.
+        date_time MUST be ISO 8601 (YYYY-MM-DDTHH:MM:SS) -- convert
+        whatever the caller said using today's date, given in your
+        instructions, as the reference point."""
+        try:
+            scheduled_for = datetime.fromisoformat(date_time)
+            if scheduled_for.tzinfo is None:
+                # fromisoformat() on a bare "YYYY-MM-DDTHH:MM:SS" (no
+                # offset) returns a naive datetime. Passing that straight
+                # to asyncpg for a timestamptz column gets it silently
+                # reinterpreted using the SERVER's local system timezone
+                # -- confirmed live: "3 PM" got stored as "9:30 UTC" on a
+                # machine set to IST (UTC+5:30), a silent 5.5h shift with
+                # no error. Pinning it to UTC here makes storage
+                # deterministic instead of dependent on whatever machine
+                # happens to run this code. This still doesn't know what
+                # timezone the caller actually meant by "3 PM" -- that
+                # needs a real business-timezone setting, which doesn't
+                # exist yet.
+                scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            # Surfaces back to the model as this tool call's result, so it
+            # can retry with a corrected value instead of silently
+            # dropping or corrupting the booking.
+            raise agents.ToolError(
+                f"date_time {date_time!r} isn't valid ISO 8601 "
+                "(YYYY-MM-DDTHH:MM:SS). Re-derive it from today's date and "
+                "call confirm_booking again."
+            ) from exc
+
+        call_state: db.CallState = context.session.userdata
+        await db.create_appointment(
+            call_state.call_id, customer_name, service, scheduled_for
+        )
         logger.info(
-            "booking confirmed (not yet persisted): service=%r date_time=%r name=%r",
+            "booking confirmed and persisted: service=%r scheduled_for=%s name=%r",
             service,
-            date_time,
+            scheduled_for,
             customer_name,
         )
         return IntentAgent(
