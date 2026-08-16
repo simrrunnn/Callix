@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Lora", ui-serif, Georgia, serif;
+
+  --color-cream: #faf3ea;
+  --color-cream-alt: #f4ebde;
+  --color-ink: #1f1b16;
+  --color-muted: #6b6558;
+  --color-line: #e6dcc9;
+  --color-badge-bg: #f3e0c4;
+  --color-badge-text: #9a5b23;
+  --color-accent: #3f7d4f;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-cream);
+  color: var(--color-ink);
+}
