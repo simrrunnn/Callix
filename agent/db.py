@@ -105,18 +105,27 @@ async def record_turn(
 
 
 async def find_active_appointment(customer_name: str) -> dict | None:
-    """Finds an existing 'booked' appointment under this name, if any.
-    Matched on name alone since there's no real caller identity (phone
-    number) yet -- weak matching (two different callers could share a
-    common name), but confirmed live this gap is real: a second booking
-    for a name that already had a 3pm appointment silently created a
-    duplicate with no warning at all. This is a known simplification, not
-    a complete fix -- proper caller-identity tracking (e.g. phone number
-    once real telephony is wired up) would replace this."""
+    """Finds an existing, not-yet-passed 'booked' appointment under this
+    name, if any. Matched on name alone since there's no real caller
+    identity (phone number) yet -- weak matching (two different callers
+    could share a common name), but confirmed live this gap is real: a
+    second booking for a name that already had a 3pm appointment silently
+    created a duplicate with no warning at all. This is a known
+    simplification, not a complete fix -- proper caller-identity tracking
+    (e.g. phone number once real telephony is wired up) would replace
+    this.
+
+    The scheduled_for >= now() filter was added after a live test showed
+    this matching an appointment three days in the past: nothing ever
+    transitions a 'booked' row to 'completed' once its time passes, so
+    without this filter every caller who'd ever booked before would be
+    told they have a conflicting appointment forever, even for one that
+    already happened."""
     pool = await get_pool()
     row = await pool.fetchrow(
         "select id, service, scheduled_for from appointments "
         "where lower(customer_name) = lower($1) and status = 'booked' "
+        "and scheduled_for >= now() "
         "order by scheduled_for limit 1",
         customer_name,
     )
