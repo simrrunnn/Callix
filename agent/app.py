@@ -40,8 +40,12 @@ import sys
 import gradio as gr
 import spaces
 from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 from livekit import agents
+from starlette.middleware import Middleware
 
+from api.calls import router as calls_router
+from api.dashboard import router as dashboard_router
 from voice_agent import entrypoint
 
 
@@ -71,7 +75,39 @@ def main() -> None:
         gpu_status = gr.Textbox(label="ZeroGPU status", interactive=False)
         check_gpu_button.click(fn=check_zerogpu, outputs=gpu_status)
 
-    demo.launch(server_name="0.0.0.0", server_port=7860, prevent_thread_lock=True)
+    # launch() unconditionally rebuilds `self.app` (App.create_app(...)) and
+    # reassigns demo.app to the new object -- so anything attached to
+    # demo.app *before* calling launch() is silently discarded. Middleware
+    # has to be baked in at construction time instead (Starlette builds the
+    # middleware stack once, at startup), which is why it's passed via
+    # app_kwargs here rather than demo.app.add_middleware(...) after the
+    # fact (that hangs -- confirmed live). allow_origins=["*"] is
+    # intentionally permissive for now since the Render frontend's exact
+    # domain isn't known yet; these endpoints have no authentication at all,
+    # which is an acceptable simplification for a demo with synthetic data
+    # but would need tightening (specific origin + real auth) before ever
+    # handling real customer data.
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        prevent_thread_lock=True,
+        app_kwargs={
+            "middleware": [
+                Middleware(
+                    CORSMiddleware,
+                    allow_origins=["*"],
+                    allow_methods=["*"],
+                    allow_headers=["*"],
+                )
+            ]
+        },
+    )
+
+    # Routers, unlike middleware, are safe to attach after launch() -- they
+    # go on the final demo.app object that launch() just created, and
+    # Starlette's router isn't "baked" the way the middleware stack is.
+    demo.app.include_router(calls_router)
+    demo.app.include_router(dashboard_router)
 
     # The worker CLI parses sys.argv itself; force it into "start"
     # (production) mode regardless of how Hugging Face actually invokes

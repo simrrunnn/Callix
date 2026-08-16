@@ -152,3 +152,49 @@ async def create_appointment(
         scheduled_for,
     )
     return appointment_id
+
+
+# --- Read queries for the dashboard API (agent/api/dashboard.py) ---
+
+
+async def list_calls(limit: int = 50) -> list[dict]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "select id, room_name, caller_number, started_at, ended_at, "
+        "end_state, escalated from calls order by started_at desc limit $1",
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_call(call_id: UUID) -> dict | None:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "select id, room_name, caller_number, started_at, ended_at, "
+        "end_state, escalated from calls where id = $1",
+        call_id,
+    )
+    return dict(row) if row else None
+
+
+async def list_turns(call_id: UUID) -> list[dict]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "select turn_index, caller_transcript, agent_reply, asr_provider, "
+        "asr_latency_ms, llm_provider, llm_latency_ms, tts_provider, "
+        "tts_latency_ms, fallback_used, created_at from turns "
+        "where call_id = $1 order by turn_index",
+        call_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def list_appointments(limit: int = 50) -> list[dict]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "select id, call_id, customer_name, service, scheduled_for, "
+        "status, created_at from appointments order by created_at desc "
+        "limit $1",
+        limit,
+    )
+    return [dict(r) for r in rows]
