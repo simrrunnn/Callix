@@ -87,10 +87,22 @@ def main() -> None:
     # which is an acceptable simplification for a demo with synthetic data
     # but would need tightening (specific origin + real auth) before ever
     # handling real customer data.
+    # ssr_mode is forced off: Gradio defaults it from the GRADIO_SSR_MODE env
+    # var, which Hugging Face's Space runtime sets to true. When SSR is on,
+    # Gradio puts a Node.js proxy in front of the app on the public port,
+    # forwarding only paths it recognizes (like /gradio_api/*) to the actual
+    # Python/FastAPI backend -- anything else, including our custom /api/*
+    # routes, falls back to the proxy's own SPA shell HTML and never reaches
+    # FastAPI at all. Confirmed live: after a Space restart, /api/token
+    # started returning a cached SPA page instead of a token, with the
+    # startup log showing "Running on local URL: http://0.0.0.0:7860, with
+    # SSR (Node proxy -> Python :7861)" -- the giveaway that requests were
+    # being served by the Node layer, never reaching Python.
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
         prevent_thread_lock=True,
+        ssr_mode=False,
         app_kwargs={
             "middleware": [
                 Middleware(
