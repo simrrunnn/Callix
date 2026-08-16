@@ -113,13 +113,20 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
         asyncio.create_task(_record())
 
-    @session.on("close")
-    def _on_close(event: agents.CloseEvent) -> None:
-        async def _end() -> None:
-            call_id = await call_state.get_call_id()
-            await db.end_call(call_id, event.reason.value)
+    # end_call() must run as a shutdown callback, not a fire-and-forget task
+    # off session.on("close") -- confirmed live that a plain
+    # asyncio.create_task() there never got a chance to run: the job process
+    # exits right after the close event fires, with no guarantee the event
+    # loop schedules the task before that happens (every turn during the
+    # call persisted fine, since there was always time between them, but
+    # ended_at/end_state stayed NULL on every call). Shutdown callbacks
+    # registered via ctx.add_shutdown_callback(), by contrast, are awaited
+    # by the worker before the job process exits.
+    async def _end_call(reason: str) -> None:
+        call_id = await call_state.get_call_id()
+        await db.end_call(call_id, reason)
 
-        asyncio.create_task(_end())
+    ctx.add_shutdown_callback(_end_call)
 
     await session.start(agent=IntentAgent(), room=ctx.room)
     logger.info("session started")
