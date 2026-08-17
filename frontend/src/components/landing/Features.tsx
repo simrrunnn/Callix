@@ -29,7 +29,7 @@ export default function Features() {
   return (
     <section id="features" className="mx-auto max-w-6xl px-6 py-16">
       <h2 className="text-center font-serif text-3xl font-semibold sm:text-4xl">
-        What our voice agent can do
+        What Callix can do
       </h2>
 
       <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">

@@ -8,7 +8,7 @@ export default function Navbar() {
     <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
       <div className="flex items-center gap-2 font-serif text-lg font-semibold">
         <AudioWaveform className="h-5 w-5" strokeWidth={2.5} />
-        VoiceAgent
+        Callix
       </div>
 
       <nav className="hidden items-center gap-8 text-sm text-ink/80 md:flex">

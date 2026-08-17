@@ -24,7 +24,7 @@ export default function Demo() {
       const res = await fetchCallToken();
       setSession(res);
     } catch {
-      setError("Could not reach the voice agent. Please try again in a moment.");
+      setError("Could not reach Callix. Please try again in a moment.");
     } finally {
       setConnecting(false);
     }
@@ -45,7 +45,7 @@ export default function Demo() {
             LIVE DEMO
           </span>
           <h1 className="mt-6 font-serif text-3xl font-semibold sm:text-4xl">
-            Talk to our salon voice agent
+            Talk to Callix, our salon voice agent
           </h1>
           <p className="mt-4 text-muted">
             Click below to start a live call, right in your browser. Ask it to
@@ -86,7 +86,7 @@ function CallPanel() {
 
   return (
     <div className="flex w-full max-w-md flex-col items-center rounded-3xl bg-cream-alt px-8 py-12 text-center">
-      <p className="font-serif text-xl font-semibold">Salon Voice Agent</p>
+      <p className="font-serif text-xl font-semibold">Callix</p>
       <p className="mt-1 text-sm capitalize text-muted">{state ?? "connecting"}</p>
 
       <div className="mt-8 h-24 w-full">

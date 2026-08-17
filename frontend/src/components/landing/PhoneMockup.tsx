@@ -9,7 +9,7 @@ export default function PhoneMockup() {
 
       <div className="relative flex h-[420px] w-56 flex-col items-center justify-between rounded-[2.5rem] border-8 border-ink bg-cream px-4 py-8 shadow-xl">
         <div className="text-center">
-          <p className="font-serif text-base font-semibold">AI Voice Agent</p>
+          <p className="font-serif text-base font-semibold">Callix</p>
           <p className="mt-1 text-xs text-muted">Speaking...</p>
         </div>
 

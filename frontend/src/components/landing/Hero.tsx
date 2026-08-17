@@ -11,13 +11,12 @@ export default function Hero() {
           </span>
 
           <h1 className="mt-6 font-serif text-4xl font-semibold leading-tight sm:text-5xl">
-            AI Voice Agent for Smarter Customer Conversations
+            Callix: AI Voice Agent for Smarter Customer Conversations
           </h1>
 
           <p className="mt-5 max-w-md text-muted">
-            Handle calls, answer questions, and resolve issues -- 24/7. Our AI
-            voice agent sounds natural, understands intents, and delivers
-            real results.
+            Handle calls, answer questions, and resolve issues 24/7. Callix
+            sounds natural, understands intents, and delivers real results.
           </p>
 
           <div className="mt-8 flex flex-wrap gap-3">
